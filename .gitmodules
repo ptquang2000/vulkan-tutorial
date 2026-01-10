@@ -1,0 +1,6 @@
+[submodule "Vulkan-Tutorial"]
+	path = Vulkan-Tutorial
+	url = https://github.com/KhronosGroup/Vulkan-Tutorial
+[submodule "stb"]
+	path = stb
+	url = https://github.com/nothings/stb.git
