@@ -22,7 +22,6 @@ add_executable(HelloTriangle main.cpp)
 
 target_link_libraries(HelloTriangle PUBLIC glfw Vulkan::cppm)
 
-
 add_custom_command(
 	TARGET HelloTriangle POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E create_symlink

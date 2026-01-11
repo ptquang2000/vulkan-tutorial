@@ -556,7 +556,8 @@ class HelloTriangleApplication {
                            });
   }
 
-  vk::raii::DeviceMemory createDeviceMemory(const vk::raii::Buffer& buffer,
+  template <class Buffer>
+  vk::raii::DeviceMemory createDeviceMemory(const Buffer& buffer,
                                             vk::MemoryPropertyFlags property) {
     const vk::MemoryRequirements requirements = buffer.getMemoryRequirements();
     const vk::PhysicalDeviceMemoryProperties properties =
@@ -564,11 +565,13 @@ class HelloTriangleApplication {
     for (uint32_t i = 0; i < properties.memoryTypeCount; i++) {
       if ((requirements.memoryTypeBits & (1 << i)) &&
           (properties.memoryTypes[i].propertyFlags & property) == property) {
-        return vk::raii::DeviceMemory(m_device,
-                                      vk::MemoryAllocateInfo{
-                                          .allocationSize = requirements.size,
-                                          .memoryTypeIndex = i,
-                                      });
+        auto memory = vk::raii::DeviceMemory(
+            m_device, vk::MemoryAllocateInfo{
+                          .allocationSize = requirements.size,
+                          .memoryTypeIndex = i,
+                      });
+        buffer.bindMemory(memory, 0);
+        return std::move(memory);
       }
     }
     return nullptr;
@@ -612,7 +615,6 @@ class HelloTriangleApplication {
     auto stagingBufferMemory = createDeviceMemory(
         stagingBuffer, vk::MemoryPropertyFlagBits::eHostVisible |
                            vk::MemoryPropertyFlagBits::eHostCoherent);
-    stagingBuffer.bindMemory(stagingBufferMemory, 0);
 
     void* data = stagingBufferMemory.mapMemory(0, bufferSize);
     memcpy(data, k_vertices.data(), bufferSize);
@@ -627,7 +629,6 @@ class HelloTriangleApplication {
                   });
     m_vertexBufferMemory = createDeviceMemory(
         m_vertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    m_vertexBuffer.bindMemory(m_vertexBufferMemory, 0);
 
     copyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
   }
@@ -644,7 +645,6 @@ class HelloTriangleApplication {
     vk::raii::DeviceMemory stagingBufferMemory = createDeviceMemory(
         stagingBuffer, vk::MemoryPropertyFlagBits::eHostVisible |
                            vk::MemoryPropertyFlagBits::eHostCoherent);
-    stagingBuffer.bindMemory(stagingBufferMemory, 0);
 
     void* data = stagingBufferMemory.mapMemory(0, bufferSize);
     memcpy(data, k_indices.data(), (size_t)bufferSize);
@@ -658,8 +658,7 @@ class HelloTriangleApplication {
                       .sharingMode = vk::SharingMode::eExclusive,
                   });
     m_indexBufferMemory = createDeviceMemory(
-        m_vertexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
-    m_indexBuffer.bindMemory(m_indexBufferMemory, 0);
+        m_indexBuffer, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
     copyBuffer(stagingBuffer, m_indexBuffer, bufferSize);
   }
@@ -678,7 +677,6 @@ class HelloTriangleApplication {
       vk::raii::DeviceMemory bufferMem = createDeviceMemory(
           buffer, vk::MemoryPropertyFlagBits::eHostVisible |
                       vk::MemoryPropertyFlagBits::eHostCoherent);
-      buffer.bindMemory(bufferMem, 0);
 
       m_uniformBuffers.emplace_back(std::move(buffer));
       m_uniformBuffersMemory.emplace_back(std::move(bufferMem));
@@ -840,19 +838,6 @@ class HelloTriangleApplication {
     }
   }
 
-  void createTextureImage() {
-    int texWidth, texHeight, texChannels;
-    const std::filesystem::path textureFile = m_texturesPath / "texture.jpg";
-    stbi_uc* pixels = stbi_load(textureFile.c_str(), &texWidth, &texHeight,
-                                &texChannels, STBI_rgb_alpha);
-    if (!pixels) {
-      throw std::runtime_error(
-          std::format("Failed to open {}.", textureFile.string()));
-    }
-
-    vk::DeviceSize imageSize = texWidth * texHeight * 4;
-  }
-
   void mainLoop() {
     while (!glfwWindowShouldClose(m_window)) {
       glfwPollEvents();
@@ -944,6 +929,56 @@ class HelloTriangleApplication {
            sizeof(ubo));
   }
 
+  void createTextureImage() {
+    int texWidth, texHeight, texChannels;
+    const std::filesystem::path textureFile = m_texturesPath / "texture.jpg";
+    stbi_uc* pixels = stbi_load(textureFile.c_str(), &texWidth, &texHeight,
+                                &texChannels, STBI_rgb_alpha);
+    if (!pixels) {
+      throw std::runtime_error(
+          std::format("Failed to open {}.", textureFile.string()));
+    }
+
+    vk::DeviceSize imageSize = texWidth * texHeight * 4;
+    auto stagingBuffer = vk::raii::Buffer(
+        m_device, vk::BufferCreateInfo{
+                      .size = imageSize,
+                      .usage = vk::BufferUsageFlagBits::eTransferSrc,
+                      .sharingMode = vk::SharingMode::eExclusive,
+                  });
+    auto stagingBufferMemory = createDeviceMemory(
+        stagingBuffer, vk::MemoryPropertyFlagBits::eHostVisible |
+                           vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    void* data = stagingBufferMemory.mapMemory(0, imageSize);
+    memcpy(data, pixels, imageSize);
+    stagingBufferMemory.unmapMemory();
+
+    stbi_image_free(pixels);
+
+    m_textureImage = vk::raii::Image(
+        m_device, vk::ImageCreateInfo{
+                      .imageType = vk::ImageType::e2D,
+                      .format = vk::Format::eR8G8B8A8Srgb,
+                      .extent =
+                          vk::Extent3D{
+                              .width = static_cast<uint32_t>(texWidth),
+                              .height = static_cast<uint32_t>(texHeight),
+                              .depth = 1,
+                          },
+                      .mipLevels = 1,
+                      .arrayLayers = 1,
+                      .samples = vk::SampleCountFlagBits::e1,
+                      .tiling = vk::ImageTiling::eOptimal,
+                      .usage = vk::ImageUsageFlagBits::eTransferDst |
+                               vk::ImageUsageFlagBits::eSampled,
+                      .sharingMode = vk::SharingMode::eExclusive,
+                      .initialLayout = vk::ImageLayout::eUndefined,
+                  });
+    m_textureImageMemory = createDeviceMemory(
+        m_textureImage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+  }
+
   void cleanup() {
     m_device.waitIdle();
     cleanupSwapChain();
@@ -1011,6 +1046,9 @@ class HelloTriangleApplication {
   std::vector<vk::raii::Semaphore> m_renderFinishedSemaphores;
   std::vector<vk::raii::Semaphore> m_presentCompletedSemaphores;
   std::vector<vk::raii::Fence> m_drawFences;
+
+  vk::raii::Image m_textureImage = nullptr;
+  vk::raii::DeviceMemory m_textureImageMemory = nullptr;
 };
 
 int main() {
