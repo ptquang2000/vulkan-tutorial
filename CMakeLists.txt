@@ -62,7 +62,7 @@ function (add_slang_shader_target TARGET)
 	add_custom_target(${TARGET} DEPENDS ${SHADER_BINARIES})
 endfunction()
 
-add_slang_shader_target(HelloTriangleShaders SOURCES 22_shader_ubo.slang)
+add_slang_shader_target(HelloTriangleShaders SOURCES 22_shader_ubo.slang 27_shader_depth.slang)
 
 function(add_texture_target TARGET)	
 	cmake_parse_arguments ("TEXTURE" "" "" "SOURCES" ${ARGN})
@@ -95,6 +95,6 @@ function(add_texture_target TARGET)
 	add_custom_target(${TARGET} DEPENDS ${TEXTURE_BINARIES})
 endfunction()
 
-add_texture_target(HelloTriangleTextures SOURCES texture.jpg)
+add_texture_target(HelloTriangleTextures SOURCES texture.jpg triangle.png)
 
 add_dependencies(HelloTriangle HelloTriangleShaders HelloTriangleTextures)

@@ -56,10 +56,12 @@ recreate graphic pipeline in advance
     - select physical device (gpu)
     - get graphics and present queue from gpu
     - create logical device
+
 2. surface:
     - create swapchain, swapchain view 
         + surface width + height -> extent 
         + gpu -> format (color); present mode
+        
 3. pipeline: (describe how gpu tasks)
     - compile shader -> shader module (gpu binary)
     - describe gpu task
@@ -70,12 +72,21 @@ recreate graphic pipeline in advance
         + rasterizer (divide into chunk)
         + multisampling
         + colorblending
+
 4. buffers: data packet between cpu and gpu
+
 5. vertex buffers:
     - vertex shader input
     - staging buffer -> copy to cpu
     - vertex buffer -> copy from cpu to gpu 
+
 6. index buffers:
     - reuse vertex
+
 7. uniform buffers:
     - mutable variable during vertex shader stage.
+    - bind uniform buffer to buffer descriptor
+
+8. texture image:
+    - copy image binaries data to buffer with transfer layout
+    - create image view and sampler then bind them to image descriptor
