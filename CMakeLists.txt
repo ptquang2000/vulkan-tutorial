@@ -5,6 +5,12 @@ project (HelloTriangle)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+	set(ARCH "x86_64")
+else()
+	set(ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
 include(FetchContent)
 if (WIN32)
 	FetchContent_Declare(glfw
@@ -30,6 +36,10 @@ elseif(UNIX)
 	)
 	FetchContent_MakeAvailable(vulkan glfw glm)
 
+	set(ENV{VULKAN_SDK} "${vulkan_SOURCE_DIR}/${ARCH}")
+	set(LD_LIBRARY_PATH "$ENV{VULKAN_SDK}/lib")
+	set(VK_ADD_LAYER_PATH "$ENV{VULKAN_SDK}/share/vulkan/explicit_layer.d")
+	message(STATUS "VK_ADD_LAYER_PATH: ${VK_ADD_LAYER_PATH}")
 	add_library(glfw SHARED IMPORTED)
 	set_target_properties(glfw PROPERTIES
 		IMPORTED_LOCATION ${glfw_SOURCE_DIR}/usr/lib/libglfw.so
@@ -80,13 +90,13 @@ function (add_slang_shader_target TARGET)
 		set(SHADER_SOURCE "${SHADER_DIR}/${SHADER_FILENAME}")
 		string(REPLACE "slang" "spv" SHADER_BINARY  ${SHADER_FILENAME})
 
-  		add_custom_command(
+		add_custom_command(
 			OUTPUT  ${SHADER_BINARY_DIR}/${SHADER_BINARY}
-			COMMAND slangc ${SHADER_SOURCE} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADER_BINARY}
+			COMMAND ${CMAKE_COMMAND} -E env LD_LIBRARY_PATH=${LD_LIBRARY_PATH} $ENV{VULKAN_SDK}/bin/slangc ${SHADER_SOURCE} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADER_BINARY}
 			WORKING_DIRECTORY ${SHADER_BINARY_DIR}
 			DEPENDS ${SHADER_DIR} ${SHADER_SOURCE}
 			COMMENT "Compiling Slang Shader: ${SHADER_SOURCE}"
-        	  	VERBATIM
+			VERBATIM
 		)
 
 		list(APPEND SHADER_BINARIES "${SHADER_BINARY_DIR}/${SHADER_BINARY}")
@@ -129,3 +139,9 @@ endfunction()
 add_slang_shader_target(${PROJECT_NAME}Shaders SOURCES 22_shader_ubo.slang 27_shader_depth.slang)
 add_texture_target(${PROJECT_NAME}Textures SOURCES texture.jpg triangle.png)
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}Shaders ${PROJECT_NAME}Textures)
+
+add_custom_command(
+	TARGET ${PROJECT_NAME} POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E env LD_LIBRARY_PATH=${LD_LIBRARY_PATH} VK_ADD_LAYER_PATH=${VK_ADD_LAYER_PATH} ${CMAKE_BINARY_DIR}/${PROJECT_NAME}
+	COMMENT "Running ${PROJECT_NAME}"
+)
