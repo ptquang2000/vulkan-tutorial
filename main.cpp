@@ -11,6 +11,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <vulkan/vulkan_raii.hpp>
@@ -89,7 +90,7 @@ class SingleTimeCommand final {
 
 class HelloTriangleApplication {
   struct Vertex {
-    glm::vec2 pos;
+    glm::vec3 pos;
     glm::vec3 color;
     glm::vec2 texCoord;
 
@@ -104,8 +105,8 @@ class HelloTriangleApplication {
     static constexpr std::array<vk::VertexInputAttributeDescription, 3>
     getAttributeDescriptions() {
       return {
-          vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32Sfloat,
-                                              offsetof(Vertex, pos)),
+          vk::VertexInputAttributeDescription(
+              0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos)),
           vk::VertexInputAttributeDescription(
               1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color)),
           vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat,
@@ -114,30 +115,45 @@ class HelloTriangleApplication {
     }
   };
   static constexpr std::array k_triangleVertices = {
-      Vertex{{-0.5f, 0.5f}, {1.0f, 0.0f, 0.0f}},
-      Vertex{{-0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-      Vertex{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+      Vertex{{-0.5f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+      Vertex{{-0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+      Vertex{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
   };
   static constexpr std::array<uint16_t, 6> k_triangleIndices = {0, 1, 2};
 
   static constexpr std::array k_squareVertices = {
-      Vertex{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-      Vertex{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-      Vertex{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-      Vertex{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}},
+      Vertex{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+      Vertex{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+      Vertex{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+      Vertex{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}},
   };
-  static constexpr std::array<uint16_t, 6> k_squareIndices = {
+  static constexpr std::array k_squareIndices = {
       0, 1, 2, 2, 3, 0,
   };
 
   static constexpr std::array k_textureVertices = {
-      Vertex{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {3.0f, 0.0f}},
-      Vertex{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-      Vertex{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 3.0f}},
-      Vertex{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {3.0f, 3.0f}},
+      Vertex{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {3.0f, 0.0f}},
+      Vertex{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+      Vertex{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 3.0f}},
+      Vertex{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {3.0f, 3.0f}},
   };
   static constexpr std::array<uint16_t, 6> k_textureIndices = {
       0, 1, 2, 2, 3, 0,
+  };
+
+  static constexpr std::array k_3dVertices = {
+      Vertex{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+      Vertex{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+      Vertex{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+      Vertex{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+
+      Vertex{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {3.0f, 0.0f}},
+      Vertex{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+      Vertex{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 3.0f}},
+      Vertex{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {3.0f, 3.0f}},
+  };
+  static constexpr std::array k_3dIndices = {
+      0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4,
   };
 
   struct UniformBufferObject {
@@ -184,10 +200,8 @@ class HelloTriangleApplication {
     m_texturesPath = root / "textures";
     m_shadersPath = root / "shaders";
 
-    m_vertices =
-        std::vector<Vertex>(k_textureVertices.begin(), k_textureVertices.end());
-    m_indices =
-        std::vector<uint16_t>(k_textureIndices.begin(), k_textureIndices.end());
+    m_vertices = std::vector<Vertex>(k_3dVertices.begin(), k_3dVertices.end());
+    m_indices = std::vector<uint16_t>(k_3dIndices.begin(), k_3dIndices.end());
   }
 
   void initWindow() {
@@ -218,6 +232,7 @@ class HelloTriangleApplication {
     m_sharingMode = createLogicalDevice();
     createSwapChain();
     createDescriptorSetLayout();
+    createDepthResources();
     createGraphicsPipeline();
     createCommandBuffers();
     createTextureImage();
@@ -574,6 +589,14 @@ class HelloTriangleApplication {
         .sampleShadingEnable = vk::False,
     };
 
+    vk::PipelineDepthStencilStateCreateInfo depthStencil{
+        .depthTestEnable = vk::True,
+        .depthWriteEnable = vk::True,
+        .depthCompareOp = vk::CompareOp::eLess,
+        .depthBoundsTestEnable = vk::False,
+        .stencilTestEnable = vk::False,
+    };
+
     vk::PipelineColorBlendAttachmentState colorBlendAttachment{
         .blendEnable = vk::False,
         .colorWriteMask =
@@ -594,26 +617,31 @@ class HelloTriangleApplication {
                       .pushConstantRangeCount = 0,
                   });
 
-    vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
-        .colorAttachmentCount = 1,
-        .pColorAttachmentFormats = &m_swapChainImageFormat,
-    };
+    vk::StructureChain<vk::GraphicsPipelineCreateInfo,
+                       vk::PipelineRenderingCreateInfo>
+        pipelineCreateInfoChain = {
+            {
+                .stageCount = 2,
+                .pStages = shaderStages,
+                .pVertexInputState = &vertexInputInfo,
+                .pInputAssemblyState = &inputAssembly,
+                .pViewportState = &viewportState,
+                .pRasterizationState = &rasterizer,
+                .pMultisampleState = &multisampling,
+                .pDepthStencilState = &depthStencil,
+                .pColorBlendState = &colorBlending,
+                .pDynamicState = &dynamicState,
+                .layout = m_pipelineLayout,
+                .renderPass = nullptr,
+            },
+            {
+                .colorAttachmentCount = 1,
+                .pColorAttachmentFormats = &m_swapChainImageFormat,
+                .depthAttachmentFormat = m_depthFormat,
+            },
+        };
     m_graphicsPipeline =
-        vk::raii::Pipeline(m_device, nullptr,
-                           vk::GraphicsPipelineCreateInfo{
-                               .pNext = &pipelineRenderingCreateInfo,
-                               .stageCount = 2,
-                               .pStages = shaderStages,
-                               .pVertexInputState = &vertexInputInfo,
-                               .pInputAssemblyState = &inputAssembly,
-                               .pViewportState = &viewportState,
-                               .pRasterizationState = &rasterizer,
-                               .pMultisampleState = &multisampling,
-                               .pColorBlendState = &colorBlending,
-                               .pDynamicState = &dynamicState,
-                               .layout = m_pipelineLayout,
-                               .renderPass = nullptr,
-                           });
+        vk::raii::Pipeline(m_device, nullptr, pipelineCreateInfoChain.get());
   }
 
   template <class Buffer>
@@ -829,15 +857,9 @@ class HelloTriangleApplication {
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = nullptr,
     };
-    const vk::RenderingAttachmentInfo attachmentInfo = {
-        .imageView = m_swapChainImageViews.at(imageIdx),
-        .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp = vk::AttachmentLoadOp::eClear,
-        .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue = vk::ClearColorValue(0.f, 0.f, 0.f, 1.f),
-    };
 
     commandBuffer.begin(vk::CommandBufferBeginInfo{});
+
     auto colorAttachmentBarrier = defaultBarrier;
     colorAttachmentBarrier.oldLayout = vk::ImageLayout::eUndefined;
     colorAttachmentBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
@@ -851,6 +873,39 @@ class HelloTriangleApplication {
     defaultDepenency.pImageMemoryBarriers = &colorAttachmentBarrier;
     commandBuffer.pipelineBarrier2(defaultDepenency);
 
+    auto depthAttachmentBarrier = defaultBarrier;
+    depthAttachmentBarrier.image = m_depthImage;
+    depthAttachmentBarrier.subresourceRange.aspectMask =
+        vk::ImageAspectFlagBits::eDepth;
+    depthAttachmentBarrier.oldLayout = vk::ImageLayout::eUndefined;
+    depthAttachmentBarrier.srcAccessMask =
+        vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+    depthAttachmentBarrier.srcStageMask =
+        vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+        vk::PipelineStageFlagBits2::eLateFragmentTests;
+    depthAttachmentBarrier.newLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+    depthAttachmentBarrier.dstAccessMask =
+        vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+    depthAttachmentBarrier.dstStageMask =
+        vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+        vk::PipelineStageFlagBits2::eLateFragmentTests;
+    defaultDepenency.pImageMemoryBarriers = &depthAttachmentBarrier;
+    commandBuffer.pipelineBarrier2(defaultDepenency);
+
+    const vk::RenderingAttachmentInfo colorAttachmentInfo = {
+        .imageView = m_swapChainImageViews.at(imageIdx),
+        .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp = vk::AttachmentLoadOp::eClear,
+        .storeOp = vk::AttachmentStoreOp::eStore,
+        .clearValue = vk::ClearColorValue(0.f, 0.f, 0.f, 1.f),
+    };
+    const vk::RenderingAttachmentInfo depthAttachmenthInfo = {
+        .imageView = m_depthImageView,
+        .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp = vk::AttachmentLoadOp::eClear,
+        .storeOp = vk::AttachmentStoreOp::eDontCare,
+        .clearValue = vk::ClearDepthStencilValue(1.0f, 0.f),
+    };
     commandBuffer.beginRendering(vk::RenderingInfo{
         .renderArea =
             {
@@ -859,7 +914,8 @@ class HelloTriangleApplication {
             },
         .layerCount = 1,
         .colorAttachmentCount = 1,
-        .pColorAttachments = &attachmentInfo,
+        .pColorAttachments = &colorAttachmentInfo,
+        .pDepthAttachment = &depthAttachmenthInfo,
     });
 
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
@@ -889,6 +945,7 @@ class HelloTriangleApplication {
     presentBarrier.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
     defaultDepenency.pImageMemoryBarriers = &presentBarrier;
     commandBuffer.pipelineBarrier2(defaultDepenency);
+
     commandBuffer.end();
   }
 
@@ -999,6 +1056,70 @@ class HelloTriangleApplication {
     ubo.proj[1][1] *= -1;
     memcpy(m_uniformBuffersMapped.at(imageIdx % k_maxFramesInFlight), &ubo,
            sizeof(ubo));
+  }
+
+  void createDepthResources() {
+    constexpr auto tiling = vk::ImageTiling::eOptimal;
+
+    auto formats =
+        std::array{
+            vk::Format::eD32Sfloat,
+            vk::Format::eD32SfloatS8Uint,
+            vk::Format::eD24UnormS8Uint,
+        } |
+        std::views::filter(
+            [tiling = tiling,
+             feature = vk::FormatFeatureFlagBits::eDepthStencilAttachment,
+             this](vk::Format format) {
+              vk::FormatProperties props =
+                  m_physicalDevice.getFormatProperties(format);
+              return (tiling == vk::ImageTiling::eOptimal &&
+                      (props.optimalTilingFeatures & feature)) ||
+                     (tiling == vk::ImageTiling::eLinear &&
+                      (props.linearTilingFeatures & feature));
+            }) |
+        std::views::take(1);
+    if (formats.empty()) {
+      throw std::runtime_error("Failed to find supported formats");
+    }
+    m_depthFormat = formats.front();
+
+    const auto extent3D = vk::Extent3D{
+        .width = m_swapChainExtent.width,
+        .height = m_swapChainExtent.height,
+        .depth = 1,
+    };
+
+    m_depthImage = vk::raii::Image(
+        m_device, vk::ImageCreateInfo{
+                      .imageType = vk::ImageType::e2D,
+                      .format = m_depthFormat,
+                      .extent = extent3D,
+                      .mipLevels = 1,
+                      .arrayLayers = 1,
+                      .samples = vk::SampleCountFlagBits::e1,
+                      .tiling = tiling,
+                      .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                      .sharingMode = vk::SharingMode::eExclusive,
+                      .initialLayout = vk::ImageLayout::eUndefined,
+                  });
+    m_depthImageMemory = createDeviceMemory(
+        m_depthImage, vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    m_depthImageView = vk::raii::ImageView(
+        m_device, vk::ImageViewCreateInfo{
+                      .image = m_depthImage,
+                      .viewType = vk::ImageViewType::e2D,
+                      .format = m_depthFormat,
+                      .subresourceRange =
+                          vk::ImageSubresourceRange{
+                              .aspectMask = vk::ImageAspectFlagBits::eDepth,
+                              .baseMipLevel = 0,
+                              .levelCount = 1,
+                              .baseArrayLayer = 0,
+                              .layerCount = 1,
+                          },
+                  });
   }
 
   void createTextureImage() {
@@ -1125,7 +1246,7 @@ class HelloTriangleApplication {
   void transitionImageLayout(const vk::raii::Image& image,
                              vk::ImageLayout oldLayout,
                              vk::ImageLayout newLayout) {
-    vk::ImageMemoryBarrier barrier{
+    vk::ImageMemoryBarrier2 barrier{
         .oldLayout = oldLayout,
         .newLayout = newLayout,
         .image = image,
@@ -1143,26 +1264,27 @@ class HelloTriangleApplication {
     vk::PipelineStageFlags destinationStage;
     if (oldLayout == vk::ImageLayout::eUndefined &&
         newLayout == vk::ImageLayout::eTransferDstOptimal) {
-      barrier.srcAccessMask = vk::AccessFlags{};
-      barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
-
-      sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
-      destinationStage = vk::PipelineStageFlagBits::eTransfer;
+      barrier.srcAccessMask = vk::AccessFlags2{};
+      barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+      barrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+      barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
     } else if (oldLayout == vk::ImageLayout::eTransferDstOptimal &&
                newLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
-      barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-      barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-
-      sourceStage = vk::PipelineStageFlagBits::eTransfer;
-      destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+      barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+      barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+      barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+      barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
     } else {
       throw std::invalid_argument("Unsupported layout transition!");
     }
 
     SingleTimeCommand(m_device, m_commandPool, m_graphicsQueue)
         .get()
-        .pipelineBarrier(sourceStage, destinationStage, {}, {}, nullptr,
-                         barrier);
+        .pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlags{},
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        });
   }
 
   void cleanup() {
@@ -1181,6 +1303,7 @@ class HelloTriangleApplication {
     m_device.waitIdle();
     cleanupSwapChain();
     createSwapChain();
+    createDepthResources();
   }
 
  public:
@@ -1240,6 +1363,11 @@ class HelloTriangleApplication {
   vk::raii::DeviceMemory m_textureImageMemory = nullptr;
   vk::raii::ImageView m_textureImageView = nullptr;
   vk::raii::Sampler m_sampler = nullptr;
+
+  vk::raii::Image m_depthImage = nullptr;
+  vk::raii::DeviceMemory m_depthImageMemory = nullptr;
+  vk::raii::ImageView m_depthImageView = nullptr;
+  vk::Format m_depthFormat;
 };
 
 int main() {

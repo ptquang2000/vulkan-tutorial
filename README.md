@@ -90,3 +90,7 @@ recreate graphic pipeline in advance
 8. texture image:
     - copy image binaries data to buffer with transfer layout
     - create image view and sampler then bind them to image descriptor
+
+9. depth buffering:
+    - create depth image for render command's depth attachment
+    - describe depth testing in pipeline's rasterizer
