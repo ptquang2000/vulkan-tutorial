@@ -136,9 +136,42 @@ function(add_texture_target TARGET)
 	add_custom_target(${TARGET} DEPENDS ${TEXTURE_BINARIES})
 endfunction()
 
+
+function(add_models_target TARGET)	
+	cmake_parse_arguments ("MODEL" "" "" "SOURCES" ${ARGN})
+
+	set(MODEL_DIR ${CMAKE_CURRENT_LIST_DIR}/Vulkan-Tutorial/attachments/assets)
+	set(MODEL_BINARY_DIR ${CMAKE_BINARY_DIR}/models)
+	set(MODEL_BINARIES "")
+
+  	add_custom_command(
+		OUTPUT ${MODEL_BINARY_DIR}
+          	COMMAND ${CMAKE_COMMAND} -E make_directory ${MODEL_BINARY_DIR}
+		COMMENT "Create directory: ${MODEL_BINARY_DIR}"
+  	)
+
+	foreach(MODEL_FILENAME ${MODEL_SOURCES})
+		set(MODEL_SOURCE "${MODEL_DIR}/${MODEL_FILENAME}")
+
+  		add_custom_command(
+			OUTPUT  ${MODEL_BINARY_DIR}/${MODEL_FILENAME}
+			COMMAND ${CMAKE_COMMAND} -E copy ${MODEL_SOURCE} ${MODEL_BINARY_DIR}
+			WORKING_DIRECTORY ${MODEL_BINARY_DIR}
+			DEPENDS ${MODEL_DIR} ${MODEL_SOURCE}
+			COMMENT "Copy texture: ${MODEL_SOURCE}"
+        	  	VERBATIM
+		)
+
+		list(APPEND MODEL_BINARIES "${MODEL_BINARY_DIR}/${MODEL_FILENAME}")
+	endforeach()
+
+	add_custom_target(${TARGET} DEPENDS ${MODEL_BINARIES})
+endfunction()
+
 add_slang_shader_target(${PROJECT_NAME}Shaders SOURCES 22_shader_ubo.slang 27_shader_depth.slang)
 add_texture_target(${PROJECT_NAME}Textures SOURCES texture.jpg triangle.png)
-add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}Shaders ${PROJECT_NAME}Textures)
+add_models_target(${PROJECT_NAME}Models SOURCES viking_room.obj viking_room.png)
+add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}Shaders ${PROJECT_NAME}Textures ${PROJECT_NAME}Models)
 
 add_custom_command(
 	TARGET ${PROJECT_NAME} POST_BUILD

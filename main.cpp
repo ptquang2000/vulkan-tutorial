@@ -12,12 +12,60 @@
 #include <GLFW/glfw3.h>
 
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tinyobjloader/tiny_obj_loader.h"
+
+struct Vertex {
+  glm::vec3 pos;
+  glm::vec3 color;
+  glm::vec2 texCoord;
+
+  static constexpr vk::VertexInputBindingDescription getBindingDescription() {
+    return {
+        .binding = 0,
+        .stride = sizeof(Vertex),
+        .inputRate = vk::VertexInputRate::eVertex,
+    };
+  }
+
+  static constexpr std::array<vk::VertexInputAttributeDescription, 3>
+  getAttributeDescriptions() {
+    return {
+        vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat,
+                                            offsetof(Vertex, pos)),
+        vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32Sfloat,
+                                            offsetof(Vertex, color)),
+        vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat,
+                                            offsetof(Vertex, texCoord)),
+    };
+  }
+
+  bool operator==(const Vertex& other) const {
+    return other.pos == pos && other.color == color &&
+           other.texCoord == texCoord;
+  };
+};
+
+namespace std {
+template <>
+struct hash<Vertex> {
+  size_t operator()(Vertex const& vertex) const noexcept {
+    return ((hash<glm::vec3>()(vertex.pos) ^
+             (hash<glm::vec3>()(vertex.color) << 1)) >>
+            1) ^
+           (hash<glm::vec2>()(vertex.texCoord) << 1);
+  }
+};
+}  // namespace std
 
 namespace utils {
 template <std::ranges::input_range RequiredRange,
@@ -89,31 +137,6 @@ class SingleTimeCommand final {
 };
 
 class HelloTriangleApplication {
-  struct Vertex {
-    glm::vec3 pos;
-    glm::vec3 color;
-    glm::vec2 texCoord;
-
-    static constexpr vk::VertexInputBindingDescription getBindingDescription() {
-      return {
-          .binding = 0,
-          .stride = sizeof(Vertex),
-          .inputRate = vk::VertexInputRate::eVertex,
-      };
-    }
-
-    static constexpr std::array<vk::VertexInputAttributeDescription, 3>
-    getAttributeDescriptions() {
-      return {
-          vk::VertexInputAttributeDescription(
-              0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, pos)),
-          vk::VertexInputAttributeDescription(
-              1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color)),
-          vk::VertexInputAttributeDescription(2, 0, vk::Format::eR32G32Sfloat,
-                                              offsetof(Vertex, texCoord)),
-      };
-    }
-  };
   static constexpr std::array k_triangleVertices = {
       Vertex{{-0.5f, 0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
       Vertex{{-0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
@@ -199,9 +222,22 @@ class HelloTriangleApplication {
     const std::filesystem::path root = std::filesystem::path(exe).parent_path();
     m_texturesPath = root / "textures";
     m_shadersPath = root / "shaders";
+    m_modelsPath = root / "models";
+
+    constexpr std::string_view shaderUbo = "22_shader_ubo.spv";
+    const std::string_view shaderTextures = "27_shader_depth.spv";
+    m_shadersPath /= shaderTextures;
+
+    constexpr std::string_view texture = "texture.jpg";
+    constexpr std::string_view triangle = "triangle.png";
+    m_texturesPath /= texture;
+
+    constexpr std::string_view model = "viking_room.png";
+    m_texturesPath = m_modelsPath / model;
+    m_modelsPath /= "viking_room.obj";
 
     m_vertices = std::vector<Vertex>(k_3dVertices.begin(), k_3dVertices.end());
-    m_indices = std::vector<uint16_t>(k_3dIndices.begin(), k_3dIndices.end());
+    m_indices = std::vector<uint32_t>(k_3dIndices.begin(), k_3dIndices.end());
   }
 
   void initWindow() {
@@ -232,14 +268,18 @@ class HelloTriangleApplication {
     m_sharingMode = createLogicalDevice();
     createSwapChain();
     createDescriptorSetLayout();
+
+    loadModel();
     createDepthResources();
     createGraphicsPipeline();
     createCommandBuffers();
+
     createTextureImage();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
     createDescriptorPool();
+
     createSyncObjects();
   }
 
@@ -514,9 +554,7 @@ class HelloTriangleApplication {
   }
 
   void createGraphicsPipeline() {
-    constexpr std::string_view shaderUbo = "22_shader_ubo.spv";
-    const std::string_view shaderTextures = "27_shader_depth.spv";
-    const auto& spvFile = m_shadersPath / shaderTextures;
+    const auto& spvFile = m_shadersPath;
     std::ifstream shaderBin(spvFile, std::ios::ate | std::ios::binary);
     if (!shaderBin.is_open()) {
       throw std::runtime_error(
@@ -556,6 +594,7 @@ class HelloTriangleApplication {
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
         .topology = vk::PrimitiveTopology::eTriangleList,
+        .primitiveRestartEnable = vk::False,
     };
 
     constexpr std::array k_dynamicStates = {vk::DynamicState::eViewport,
@@ -921,7 +960,7 @@ class HelloTriangleApplication {
     commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
                                m_graphicsPipeline);
     commandBuffer.bindVertexBuffers(0, *m_vertexBuffer, {0});
-    commandBuffer.bindIndexBuffer(*m_indexBuffer, 0, vk::IndexType::eUint16);
+    commandBuffer.bindIndexBuffer(*m_indexBuffer, 0, vk::IndexType::eUint32);
 
     commandBuffer.setViewport(
         0,
@@ -1123,9 +1162,7 @@ class HelloTriangleApplication {
   }
 
   void createTextureImage() {
-    constexpr std::string_view texture = "texture.jpg";
-    constexpr std::string_view triangle = "triangle.png";
-    const std::filesystem::path textureFile = m_texturesPath / texture;
+    const std::filesystem::path textureFile = m_texturesPath;
 
     uint32_t texWidth, texHeight, texChannels;
     stbi_uc* pixels =
@@ -1287,6 +1324,54 @@ class HelloTriangleApplication {
         });
   }
 
+  void loadModel() {
+    std::filesystem::path model = m_modelsPath;
+    tinyobj::ObjReader reader;
+    if (!reader.ParseFromFile(model, tinyobj::ObjReaderConfig())) {
+      if (!reader.Error().empty()) {
+        throw std::runtime_error(
+            std::format("Failed to load model {} with error: {}",
+                        model.string(), reader.Error()));
+      }
+    }
+    if (!reader.Error().empty()) {
+      std::println("Load model {} with warning: {}", model.string(),
+                   reader.Warning());
+    }
+    const std::vector<tinyobj::shape_t>& shapes = reader.GetShapes();
+
+    m_vertices.clear();
+    m_indices.clear();
+
+    std::unordered_map<Vertex, size_t> vertices;
+    std::ranges::for_each(shapes, [attrib = reader.GetAttrib(), &vertices,
+                                   this](const tinyobj::shape_t& shape) {
+      std::ranges::for_each(
+          shape.mesh.indices,
+          [attrib, &vertices, this](const tinyobj::index_t& index) {
+            auto vertex = Vertex{
+                .pos =
+                    {
+                        attrib.vertices.at(3 * index.vertex_index + 0),
+                        attrib.vertices.at(3 * index.vertex_index + 1),
+                        attrib.vertices.at(3 * index.vertex_index + 2),
+                    },
+                .color = {1.0f, 1.0f, 1.0f},
+                .texCoord =
+                    {
+                        attrib.texcoords.at(2 * index.texcoord_index + 0),
+                        attrib.texcoords.at(2 * index.texcoord_index + 1),
+                    },
+            };
+            if (vertices.count(vertex) == 0) {
+              vertices.emplace(vertex, m_vertices.size());
+              m_vertices.emplace_back(vertex);
+            }
+            m_indices.emplace_back(vertices.at(vertex));
+          });
+    });
+  }
+
   void cleanup() {
     m_device.waitIdle();
     cleanupSwapChain();
@@ -1312,9 +1397,10 @@ class HelloTriangleApplication {
  private:
   std::filesystem::path m_texturesPath;
   std::filesystem::path m_shadersPath;
+  std::filesystem::path m_modelsPath;
 
   std::vector<Vertex> m_vertices;
-  std::vector<uint16_t> m_indices;
+  std::vector<uint32_t> m_indices;
 
   GLFWwindow* m_window;
   vk::raii::Context m_context;
