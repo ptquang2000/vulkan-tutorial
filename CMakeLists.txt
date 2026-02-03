@@ -173,8 +173,8 @@ add_texture_target(${PROJECT_NAME}Textures SOURCES texture.jpg triangle.png)
 add_models_target(${PROJECT_NAME}Models SOURCES viking_room.obj viking_room.png)
 add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}Shaders ${PROJECT_NAME}Textures ${PROJECT_NAME}Models)
 
-add_custom_command(
-	TARGET ${PROJECT_NAME} POST_BUILD
+add_custom_target(RUN ALL
+	DEPENDS ${PROJECT_NAME}
 	COMMAND ${CMAKE_COMMAND} -E env LD_LIBRARY_PATH=${LD_LIBRARY_PATH} VK_ADD_LAYER_PATH=${VK_ADD_LAYER_PATH} ${CMAKE_BINARY_DIR}/${PROJECT_NAME}
 	COMMENT "Running ${PROJECT_NAME}"
 )

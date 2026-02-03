@@ -274,9 +274,10 @@ class HelloTriangleApplication {
     createGraphicsPipeline();
     createCommandBuffers();
 
-    createTextureImage();
     createVertexBuffer();
     createIndexBuffer();
+
+    createTextureImage();
     createUniformBuffers();
     createDescriptorPool();
 
@@ -878,58 +879,14 @@ class HelloTriangleApplication {
                            uint32_t imageIdx) {
     commandBuffer.reset();
 
-    const auto defaultBarrier = vk::ImageMemoryBarrier2{
-        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-        .image = m_swapChainImages.at(imageIdx),
-        .subresourceRange =
-            {
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = 1,
-            },
-    };
-    auto defaultDepenency = vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlags{},
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = nullptr,
-    };
-
     commandBuffer.begin(vk::CommandBufferBeginInfo{});
 
-    auto colorAttachmentBarrier = defaultBarrier;
-    colorAttachmentBarrier.oldLayout = vk::ImageLayout::eUndefined;
-    colorAttachmentBarrier.srcAccessMask = vk::AccessFlagBits2::eNone;
-    colorAttachmentBarrier.srcStageMask =
-        vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-    colorAttachmentBarrier.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    colorAttachmentBarrier.dstAccessMask =
-        vk::AccessFlagBits2::eColorAttachmentWrite;
-    colorAttachmentBarrier.dstStageMask =
-        vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-    defaultDepenency.pImageMemoryBarriers = &colorAttachmentBarrier;
-    commandBuffer.pipelineBarrier2(defaultDepenency);
-
-    auto depthAttachmentBarrier = defaultBarrier;
-    depthAttachmentBarrier.image = m_depthImage;
-    depthAttachmentBarrier.subresourceRange.aspectMask =
-        vk::ImageAspectFlagBits::eDepth;
-    depthAttachmentBarrier.oldLayout = vk::ImageLayout::eUndefined;
-    depthAttachmentBarrier.srcAccessMask =
-        vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-    depthAttachmentBarrier.srcStageMask =
-        vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-        vk::PipelineStageFlagBits2::eLateFragmentTests;
-    depthAttachmentBarrier.newLayout = vk::ImageLayout::eDepthAttachmentOptimal;
-    depthAttachmentBarrier.dstAccessMask =
-        vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-    depthAttachmentBarrier.dstStageMask =
-        vk::PipelineStageFlagBits2::eEarlyFragmentTests |
-        vk::PipelineStageFlagBits2::eLateFragmentTests;
-    defaultDepenency.pImageMemoryBarriers = &depthAttachmentBarrier;
-    commandBuffer.pipelineBarrier2(defaultDepenency);
+    transitionImageLayout(commandBuffer, m_swapChainImages.at(imageIdx),
+                          vk::ImageLayout::eUndefined,
+                          vk::ImageLayout::eColorAttachmentOptimal);
+    transitionImageLayout(commandBuffer, m_depthImage,
+                          vk::ImageLayout::eUndefined,
+                          vk::ImageLayout::eDepthAttachmentOptimal);
 
     const vk::RenderingAttachmentInfo colorAttachmentInfo = {
         .imageView = m_swapChainImageViews.at(imageIdx),
@@ -961,6 +918,9 @@ class HelloTriangleApplication {
                                m_graphicsPipeline);
     commandBuffer.bindVertexBuffers(0, *m_vertexBuffer, {0});
     commandBuffer.bindIndexBuffer(*m_indexBuffer, 0, vk::IndexType::eUint32);
+    commandBuffer.bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics, m_pipelineLayout, 0,
+        *m_descriptorSets.at(imageIdx % k_maxFramesInFlight), nullptr);
 
     commandBuffer.setViewport(
         0,
@@ -969,21 +929,13 @@ class HelloTriangleApplication {
     commandBuffer.setScissor(0,
                              vk::Rect2D(vk::Offset2D(0, 0), m_swapChainExtent));
 
-    commandBuffer.bindDescriptorSets(
-        vk::PipelineBindPoint::eGraphics, m_pipelineLayout, 0,
-        *m_descriptorSets.at(imageIdx % k_maxFramesInFlight), nullptr);
     commandBuffer.drawIndexed(m_indices.size(), 1, 0, 0, 0);
+
     commandBuffer.endRendering();
 
-    auto presentBarrier = defaultBarrier;
-    presentBarrier.oldLayout = colorAttachmentBarrier.newLayout;
-    presentBarrier.srcAccessMask = colorAttachmentBarrier.dstAccessMask;
-    presentBarrier.srcStageMask = colorAttachmentBarrier.dstStageMask;
-    presentBarrier.newLayout = vk::ImageLayout::ePresentSrcKHR;
-    presentBarrier.dstAccessMask = colorAttachmentBarrier.srcAccessMask;
-    presentBarrier.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
-    defaultDepenency.pImageMemoryBarriers = &presentBarrier;
-    commandBuffer.pipelineBarrier2(defaultDepenency);
+    transitionImageLayout(commandBuffer, m_swapChainImages.at(imageIdx),
+                          vk::ImageLayout::eColorAttachmentOptimal,
+                          vk::ImageLayout::ePresentSrcKHR);
 
     commandBuffer.end();
   }
@@ -1215,8 +1167,10 @@ class HelloTriangleApplication {
     m_textureImageMemory = createDeviceMemory(
         m_textureImage, vk::MemoryPropertyFlagBits::eDeviceLocal);
 
-    transitionImageLayout(m_textureImage, vk::ImageLayout::eUndefined,
-                          vk::ImageLayout::eTransferDstOptimal);
+    transitionImageLayout(
+        SingleTimeCommand(m_device, m_commandPool, m_graphicsQueue).get(),
+        m_textureImage, vk::ImageLayout::eUndefined,
+        vk::ImageLayout::eTransferDstOptimal);
     SingleTimeCommand(m_device, m_commandPool, m_graphicsQueue)
         .get()
         .copyBufferToImage(
@@ -1235,8 +1189,10 @@ class HelloTriangleApplication {
                 .imageOffset = vk::Offset3D{.x = 0, .y = 0, .z = 0},
                 .imageExtent = extent3D,
             });
-    transitionImageLayout(m_textureImage, vk::ImageLayout::eTransferDstOptimal,
-                          vk::ImageLayout::eShaderReadOnlyOptimal);
+    transitionImageLayout(
+        SingleTimeCommand(m_device, m_commandPool, m_graphicsQueue).get(),
+        m_textureImage, vk::ImageLayout::eTransferDstOptimal,
+        vk::ImageLayout::eShaderReadOnlyOptimal);
 
     m_textureImageView = vk::raii::ImageView(
         m_device, vk::ImageViewCreateInfo{
@@ -1280,12 +1236,21 @@ class HelloTriangleApplication {
                   });
   }
 
-  void transitionImageLayout(const vk::raii::Image& image,
+  void transitionImageLayout(const vk::raii::CommandBuffer& commandBuffer,
+                             const vk::raii::Image& image,
                              vk::ImageLayout oldLayout,
+                             vk::ImageLayout newLayout) {
+    transitionImageLayout(commandBuffer, *image, oldLayout, newLayout);
+  }
+
+  void transitionImageLayout(const vk::raii::CommandBuffer& commandBuffer,
+                             const vk::Image& image, vk::ImageLayout oldLayout,
                              vk::ImageLayout newLayout) {
     vk::ImageMemoryBarrier2 barrier{
         .oldLayout = oldLayout,
         .newLayout = newLayout,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
         .image = image,
         .subresourceRange =
             {
@@ -1311,17 +1276,37 @@ class HelloTriangleApplication {
       barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
       barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
       barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+    } else if (oldLayout == vk::ImageLayout::eUndefined &&
+               newLayout == vk::ImageLayout::eColorAttachmentOptimal) {
+      barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+      barrier.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+      barrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+      barrier.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    } else if (oldLayout == vk::ImageLayout::eColorAttachmentOptimal &&
+               newLayout == vk::ImageLayout::ePresentSrcKHR) {
+      barrier.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+      barrier.dstAccessMask = vk::AccessFlagBits2::eNone;
+      barrier.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+      barrier.dstStageMask = vk::PipelineStageFlagBits2::eBottomOfPipe;
+    } else if (oldLayout == vk::ImageLayout::eUndefined &&
+               newLayout == vk::ImageLayout::eDepthAttachmentOptimal) {
+      barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+
+      barrier.srcAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+      barrier.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+      barrier.srcStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                             vk::PipelineStageFlagBits2::eLateFragmentTests;
+      barrier.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests |
+                             vk::PipelineStageFlagBits2::eLateFragmentTests;
     } else {
       throw std::invalid_argument("Unsupported layout transition!");
     }
 
-    SingleTimeCommand(m_device, m_commandPool, m_graphicsQueue)
-        .get()
-        .pipelineBarrier2(vk::DependencyInfo{
-            .dependencyFlags = vk::DependencyFlags{},
-            .imageMemoryBarrierCount = 1,
-            .pImageMemoryBarriers = &barrier,
-        });
+    commandBuffer.pipelineBarrier2(vk::DependencyInfo{
+        .dependencyFlags = vk::DependencyFlags{},
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &barrier,
+    });
   }
 
   void loadModel() {
@@ -1376,7 +1361,6 @@ class HelloTriangleApplication {
     m_device.waitIdle();
     cleanupSwapChain();
     glfwDestroyWindow(m_window);
-    glfwTerminate();
   }
 
   void cleanupSwapChain() {
