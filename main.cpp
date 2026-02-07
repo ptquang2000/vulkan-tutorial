@@ -67,6 +67,28 @@ struct hash<Vertex> {
 };
 }  // namespace std
 
+struct ModelObject {
+  glm::vec3 position{0.0f, 0.0f, 0.0f};
+  glm::vec3 rotation{0.0f, 0.0f, 0.0f};
+  glm::vec3 scale{1.0f, 1.0f, 1.0f};
+
+  std::vector<vk::raii::Buffer> uniformBuffers;
+  std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
+  std::vector<void*> uniformBuffersMapped;
+
+  std::vector<vk::raii::DescriptorSet> descriptorSets;
+
+  glm::mat4 getModelMatrix() const {
+    return glm::scale(
+        glm::rotate(
+            glm::rotate(glm::rotate(glm::translate(glm::mat4(1.0f), position),
+                                    rotation.x, glm::vec3(1.0f, 0.0f, 0.0f)),
+                        rotation.y, glm::vec3(0.0f, 1.0f, 0.0f)),
+            rotation.z, glm::vec3(0.0f, 0.0f, 1.0f)),
+        scale);
+  }
+};
+
 namespace utils {
 template <std::ranges::input_range RequiredRange,
           std::ranges::input_range SupportedRange, typename Proj>
@@ -780,83 +802,127 @@ class HelloTriangleApplication {
 
   void createUniformBuffers() {
     const vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
-    m_uniformBuffers.clear();
-    m_uniformBuffersMemory.clear();
-    m_uniformBuffersMapped.clear();
     std::ranges::for_each(
-        std::views::iota(0u, k_maxFramesInFlight), [this](auto _) {
-          m_uniformBuffers.emplace_back(
-              m_device, vk::BufferCreateInfo{
-                            .size = bufferSize,
-                            .usage = vk::BufferUsageFlagBits::eUniformBuffer,
-                        });
-          m_uniformBuffersMemory.emplace_back(createDeviceMemory(
-              m_uniformBuffers.back(),
-              vk::MemoryPropertyFlagBits::eHostVisible |
-                  vk::MemoryPropertyFlagBits::eHostCoherent));
-          m_uniformBuffersMapped.emplace_back(
-              m_uniformBuffersMemory.back().mapMemory(0, bufferSize));
+        std::views::concat(
+            m_modelObjects | std::views::transform([](ModelObject& object) {
+              return std::tuple(&object.uniformBuffers,
+                                &object.uniformBuffersMemory,
+                                &object.uniformBuffersMapped);
+            }),
+            std::views::single(std::tuple(&m_uniformBuffers,
+                                          &m_uniformBuffersMemory,
+                                          &m_uniformBuffersMapped))),
+        [this](auto&& tuple) {
+          auto&& [buffers, memory, mapped] = tuple;
+          buffers->clear();
+          memory->clear();
+          mapped->clear();
+
+          std::ranges::for_each(
+              std::views::iota(0u, k_maxFramesInFlight),
+              [this, buffers, memory, mapped](auto _) {
+                buffers->emplace_back(
+                    m_device,
+                    vk::BufferCreateInfo{
+                        .size = bufferSize,
+                        .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+                    });
+                memory->emplace_back(createDeviceMemory(
+                    buffers->back(),
+                    vk::MemoryPropertyFlagBits::eHostVisible |
+                        vk::MemoryPropertyFlagBits::eHostCoherent));
+                mapped->emplace_back(memory->back().mapMemory(0, bufferSize));
+              });
         });
   }
 
   void createDescriptorPool() {
+    constexpr auto setNo = k_maxFramesInFlight * (1 + k_maxObjects);
     std::array poolSizes = {
-        vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer,
-                               k_maxFramesInFlight),
+        vk::DescriptorPoolSize(vk::DescriptorType::eUniformBuffer, setNo),
         vk::DescriptorPoolSize(vk::DescriptorType::eCombinedImageSampler,
-                               k_maxFramesInFlight),
+                               setNo),
     };
     m_descriptorPool = vk::raii::DescriptorPool(
         m_device,
         vk::DescriptorPoolCreateInfo{
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
-            .maxSets = k_maxFramesInFlight,
+            .maxSets = setNo,
             .poolSizeCount = poolSizes.size(),
             .pPoolSizes = poolSizes.data(),
         });
-    std::vector<vk::DescriptorSetLayout> layouts(k_maxFramesInFlight,
-                                                 *m_descriptorLayout);
-    m_descriptorSets.clear();
-    m_descriptorSets =
-        m_device.allocateDescriptorSets(vk::DescriptorSetAllocateInfo{
-            .descriptorPool = m_descriptorPool,
-            .descriptorSetCount = static_cast<uint32_t>(layouts.size()),
-            .pSetLayouts = layouts.data(),
+
+    auto descriptorSets =
+        std::views::concat(
+            m_modelObjects | std::views::transform([](ModelObject& object) {
+              return &object.uniformBuffers;
+            }),
+            std::views::single(&m_uniformBuffers)) |
+        std::views::transform([layouts = std::vector<vk::DescriptorSetLayout>(
+                                   k_maxFramesInFlight, *m_descriptorLayout),
+                               this](std::vector<vk::raii::Buffer>* buffers) {
+          return std::views::zip(
+                     m_device.allocateDescriptorSets(
+                         vk::DescriptorSetAllocateInfo{
+                             .descriptorPool = m_descriptorPool,
+                             .descriptorSetCount =
+                                 static_cast<uint32_t>(layouts.size()),
+                             .pSetLayouts = layouts.data(),
+                         }),
+                     *buffers) |
+                 std::views::transform([this](
+                                           std::tuple<vk::raii::DescriptorSet&,
+                                                      vk::raii::Buffer&>
+                                               pair) {
+                   auto&& [descriptorSet, buffer] = pair;
+                   vk::DescriptorBufferInfo bufferInfo{
+                       .buffer = buffer,
+                       .offset = 0,
+                       .range = sizeof(UniformBufferObject),
+                   };
+                   vk::DescriptorImageInfo imageInfo{
+                       .sampler = m_sampler,
+                       .imageView = m_textureImageView,
+                       .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                   };
+                   m_device.updateDescriptorSets(
+                       std::array{
+                           vk::WriteDescriptorSet{
+                               .dstSet = descriptorSet,
+                               .dstBinding = 0,
+                               .dstArrayElement = 0,
+                               .descriptorCount = 1,
+                               .descriptorType =
+                                   vk::DescriptorType::eUniformBuffer,
+                               .pBufferInfo = &bufferInfo,
+                           },
+                           vk::WriteDescriptorSet{
+                               .dstSet = descriptorSet,
+                               .dstBinding = 1,
+                               .dstArrayElement = 0,
+                               .descriptorCount = 1,
+                               .descriptorType =
+                                   vk::DescriptorType::eCombinedImageSampler,
+                               .pImageInfo = &imageInfo,
+                           },
+                       },
+                       {});
+                   return std::move(descriptorSet);
+                 }) |
+                 std::ranges::to<std::vector<vk::raii::DescriptorSet>>();
         });
+
     std::ranges::for_each(
-        m_descriptorSets | std::views::enumerate, [this](auto&& pair) {
-          auto&& [idx, descriptorSet] = pair;
-          vk::DescriptorBufferInfo bufferInfo{
-              .buffer = m_uniformBuffers.at(idx),
-              .offset = 0,
-              .range = sizeof(UniformBufferObject),
-          };
-          vk::DescriptorImageInfo imageInfo{
-              .sampler = m_sampler,
-              .imageView = m_textureImageView,
-              .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-          };
-          m_device.updateDescriptorSets(
-              std::array{
-                  vk::WriteDescriptorSet{
-                      .dstSet = descriptorSet,
-                      .dstBinding = 0,
-                      .dstArrayElement = 0,
-                      .descriptorCount = 1,
-                      .descriptorType = vk::DescriptorType::eUniformBuffer,
-                      .pBufferInfo = &bufferInfo,
-                  },
-                  vk::WriteDescriptorSet{
-                      .dstSet = descriptorSet,
-                      .dstBinding = 1,
-                      .dstArrayElement = 0,
-                      .descriptorCount = 1,
-                      .descriptorType =
-                          vk::DescriptorType::eCombinedImageSampler,
-                      .pImageInfo = &imageInfo,
-                  },
-              },
-              {});
+        std::views::zip(
+            std::views::concat(
+                m_modelObjects | std::views::transform([](ModelObject& obj) {
+                  return &obj.descriptorSets;
+                }),
+                std::views::single(&m_descriptorSets)),
+            descriptorSets),
+        [](auto&& pair) {
+          auto&& [dst, src] = pair;
+          *dst = std::move(src);
         });
   }
 
@@ -914,14 +980,6 @@ class HelloTriangleApplication {
         .pDepthAttachment = &depthAttachmenthInfo,
     });
 
-    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
-                               m_graphicsPipeline);
-    commandBuffer.bindVertexBuffers(0, *m_vertexBuffer, {0});
-    commandBuffer.bindIndexBuffer(*m_indexBuffer, 0, vk::IndexType::eUint32);
-    commandBuffer.bindDescriptorSets(
-        vk::PipelineBindPoint::eGraphics, m_pipelineLayout, 0,
-        *m_descriptorSets.at(imageIdx % k_maxFramesInFlight), nullptr);
-
     commandBuffer.setViewport(
         0,
         vk::Viewport(0.0f, 0.0f, static_cast<float>(m_swapChainExtent.width),
@@ -929,7 +987,22 @@ class HelloTriangleApplication {
     commandBuffer.setScissor(0,
                              vk::Rect2D(vk::Offset2D(0, 0), m_swapChainExtent));
 
+    commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                               m_graphicsPipeline);
+    commandBuffer.bindVertexBuffers(0, *m_vertexBuffer, {0});
+    commandBuffer.bindIndexBuffer(*m_indexBuffer, 0, vk::IndexType::eUint32);
+
+    commandBuffer.bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics, m_pipelineLayout, 0,
+        *m_descriptorSets.at(imageIdx % k_maxFramesInFlight), nullptr);
     commandBuffer.drawIndexed(m_indices.size(), 1, 0, 0, 0);
+    std::ranges::for_each(m_modelObjects, [&commandBuffer, imageIdx,
+                                           this](ModelObject& object) {
+      commandBuffer.bindDescriptorSets(
+          vk::PipelineBindPoint::eGraphics, m_pipelineLayout, 0,
+          *object.descriptorSets.at(imageIdx % k_maxFramesInFlight), nullptr);
+      commandBuffer.drawIndexed(m_indices.size(), 1, 0, 0, 0);
+    });
 
     commandBuffer.endRendering();
 
@@ -1033,20 +1106,36 @@ class HelloTriangleApplication {
     float time = std::chrono::duration<float, std::chrono::seconds::period>(
                      currentTime - startTime)
                      .count();
-    UniformBufferObject ubo{};
-    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
-                            glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.view =
-        glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f),
-                    glm::vec3(0.0f, 0.0f, 1.0f));
-    ubo.proj =
-        glm::perspective(glm::radians(45.0f),
-                         static_cast<float>(m_swapChainExtent.width) /
-                             static_cast<float>(m_swapChainExtent.height),
-                         0.1f, 10.0f);
+    UniformBufferObject ubo{
+        .model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f),
+                             glm::vec3(0.0f, 0.0f, 1.0f)),
+        .view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                            glm::vec3(0.0f, 0.0f, 0.0f),
+                            glm::vec3(0.0f, 0.0f, 1.0f)),
+        .proj =
+            glm::perspective(glm::radians(45.0f),
+                             static_cast<float>(m_swapChainExtent.width) /
+                                 static_cast<float>(m_swapChainExtent.height),
+                             0.1f, 10.0f),
+    };
     ubo.proj[1][1] *= -1;
+
     memcpy(m_uniformBuffersMapped.at(imageIdx % k_maxFramesInFlight), &ubo,
            sizeof(ubo));
+    std::ranges::for_each(
+        m_modelObjects, [mainUbo = &ubo, imageIdx](ModelObject& object) {
+          object.rotation.y += 0.001f;
+          glm::mat4 model = object.getModelMatrix() *
+                            glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f),
+                                        glm::vec3(1.0f, 0.0f, 0.0f));
+          UniformBufferObject ubo{
+              .model = model,
+              .view = mainUbo->view,
+              .proj = mainUbo->proj,
+          };
+          memcpy(object.uniformBuffersMapped.at(imageIdx % k_maxFramesInFlight),
+                 &ubo, sizeof(ubo));
+        });
   }
 
   void createDepthResources() {
@@ -1355,6 +1444,18 @@ class HelloTriangleApplication {
             m_indices.emplace_back(vertices.at(vertex));
           });
     });
+
+    m_modelObjects.at(0).position = {0.0f, 0.0f, 0.0f};
+    m_modelObjects.at(1).position = {-1.0f, 0.0f, -1.0f};
+    m_modelObjects.at(2).position = {1.0f, 0.0f, -1.0f};
+
+    m_modelObjects.at(0).rotation = {0.0f, 0.0f, 0.0f};
+    m_modelObjects.at(1).rotation = {0.0f, glm::radians(45.0f), 0.0f};
+    m_modelObjects.at(2).rotation = {0.0f, glm::radians(-45.0f), 0.0f};
+
+    m_modelObjects.at(0).scale = {0.5f, 0.5f, 0.5f};
+    m_modelObjects.at(1).scale = {0.5f, 0.5f, 0.5f};
+    m_modelObjects.at(2).scale = {0.5f, 0.5f, 0.5f};
   }
 
   void cleanup() {
@@ -1438,6 +1539,9 @@ class HelloTriangleApplication {
   vk::raii::DeviceMemory m_depthImageMemory = nullptr;
   vk::raii::ImageView m_depthImageView = nullptr;
   vk::Format m_depthFormat;
+
+  static constexpr int k_maxObjects = 3;
+  std::array<ModelObject, k_maxObjects> m_modelObjects;
 };
 
 int main() {

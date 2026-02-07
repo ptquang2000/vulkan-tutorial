@@ -74,6 +74,10 @@ recreate graphic pipeline in advance
         + colorblending
 
 4. buffers: data packet between cpu and gpu
+    - command buffers: gpu instruction and data binding
+        + bind pipeline
+        + bind vertex buffer
+        + bind descriptor sets
 
 5. vertex buffers:
     - vertex shader input
@@ -94,3 +98,8 @@ recreate graphic pipeline in advance
 9. depth buffering:
     - create depth image for render command's depth attachment
     - describe depth testing in pipeline's rasterizer
+
+10. descriptor:
+    - layout: reference the *immutable* data in shader
+    - pool: holds descriptor set
+    - set: instruct the binding for pipelines
