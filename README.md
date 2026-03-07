@@ -2,10 +2,20 @@
 
 ## Build
 
+### Arch Linux
+
 ```bash
-source default/setup-env.sh
-cmake -S HelloTriangle -B HelloTriangle/.build -G Ninja
-cmake --build HelloTriangle/.build
+cmake -S . -B bin -G Ninja
+cmake --build bin
+```
+
+### Windows
+
+Install VulkanSDK from https://sdk.lunarg.com/sdk/download/1.4.321.1/windows/vulkansdk-windows-X64-1.4.321.1.exe
+
+```powershell
+cmake -S . -B bin -G "Visual Studio 17 2022"
+cmake --build bin
 ```
 
 ## Vulkan
