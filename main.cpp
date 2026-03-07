@@ -8,6 +8,9 @@
 #include <limits>
 #include <print>
 #include <ranges>
+#if _WIN32
+#include <Windows.h>
+#endif
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -107,6 +110,25 @@ bool arePropertiesSupported(const RequiredRange& required,
              });
 }
 
+std::string getExecutablePath() {
+  std::string exe;
+#ifndef _WIN32
+  exe.resize(PATH_MAX, '\0');
+  auto length = readlink("/proc/self/exe", exe.data(), exe.size());
+  if (length == -1) {
+    throw std::runtime_error("Failed to locate exe.");
+  }
+  exe.resize(length + 1);
+#else
+  exe.resize(MAX_PATH, '\0');
+  DWORD length =
+      GetModuleFileName(NULL, exe.data(), static_cast<DWORD>(exe.size()));
+  if (length == 0) {
+    throw std::runtime_error("Failed to locate exe.");
+  }
+#endif
+  return exe;
+}
 }  // namespace utils
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL debugCallback(
@@ -234,13 +256,7 @@ class HelloTriangleApplication {
 
  private:
   void init() {
-    std::string exe;
-    exe.resize(PATH_MAX, '\0');
-    auto count = readlink("/proc/self/exe", exe.data(), exe.size());
-    if (count == -1) {
-      throw std::runtime_error("Failed to locate exe.");
-    }
-    exe.resize(count + 1);
+    std::string exe = utils::getExecutablePath();
     const std::filesystem::path root = std::filesystem::path(exe).parent_path();
     m_texturesPath = root / "textures";
     m_shadersPath = root / "shaders";
@@ -263,11 +279,11 @@ class HelloTriangleApplication {
   }
 
   void initWindow() {
-    glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
+    glfwInitHint(GLFW_PLATFORM, GLFW_ANY_PLATFORM);
     glfwInit();
 
-    static constexpr uint32_t WIDTH = 640;
-    static constexpr uint32_t HEIGHT = 480;
+    static constexpr uint32_t WIDTH = 900;
+    static constexpr uint32_t HEIGHT = 600;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     m_window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
@@ -802,38 +818,36 @@ class HelloTriangleApplication {
 
   void createUniformBuffers() {
     const vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
-    std::ranges::for_each(
-        std::views::concat(
-            m_modelObjects | std::views::transform([](ModelObject& object) {
-              return std::tuple(&object.uniformBuffers,
-                                &object.uniformBuffersMemory,
-                                &object.uniformBuffersMapped);
-            }),
-            std::views::single(std::tuple(&m_uniformBuffers,
-                                          &m_uniformBuffersMemory,
-                                          &m_uniformBuffersMapped))),
-        [this](auto&& tuple) {
-          auto&& [buffers, memory, mapped] = tuple;
-          buffers->clear();
-          memory->clear();
-          mapped->clear();
+    auto bufferGroups = m_modelObjects |
+                        std::views::transform([](ModelObject& object) {
+                          return std::tuple(&object.uniformBuffers,
+                                            &object.uniformBuffersMemory,
+                                            &object.uniformBuffersMapped);
+                        }) |
+                        std::ranges::to<std::vector>();
+    bufferGroups.emplace_back(std::tuple(
+        &m_uniformBuffers, &m_uniformBuffersMemory, &m_uniformBuffersMapped));
+    std::ranges::for_each(bufferGroups, [this](auto&& tuple) {
+      auto&& [buffers, memory, mapped] = tuple;
+      buffers->clear();
+      memory->clear();
+      mapped->clear();
 
-          std::ranges::for_each(
-              std::views::iota(0u, k_maxFramesInFlight),
-              [this, buffers, memory, mapped](auto _) {
-                buffers->emplace_back(
-                    m_device,
-                    vk::BufferCreateInfo{
-                        .size = bufferSize,
-                        .usage = vk::BufferUsageFlagBits::eUniformBuffer,
-                    });
-                memory->emplace_back(createDeviceMemory(
-                    buffers->back(),
-                    vk::MemoryPropertyFlagBits::eHostVisible |
-                        vk::MemoryPropertyFlagBits::eHostCoherent));
-                mapped->emplace_back(memory->back().mapMemory(0, bufferSize));
-              });
-        });
+      std::ranges::for_each(
+          std::views::iota(0u, k_maxFramesInFlight),
+          [this, buffers, memory, mapped](auto _) {
+            buffers->emplace_back(
+                m_device, vk::BufferCreateInfo{
+                              .size = bufferSize,
+                              .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+                          });
+            memory->emplace_back(createDeviceMemory(
+                buffers->back(),
+                vk::MemoryPropertyFlagBits::eHostVisible |
+                    vk::MemoryPropertyFlagBits::eHostCoherent));
+            mapped->emplace_back(memory->back().mapMemory(0, bufferSize));
+          });
+    });
   }
 
   void createDescriptorPool() {
@@ -852,12 +866,14 @@ class HelloTriangleApplication {
             .pPoolSizes = poolSizes.data(),
         });
 
+    auto uniformBufferRefs = m_modelObjects |
+                             std::views::transform([](ModelObject& object) {
+                               return &object.uniformBuffers;
+                             }) |
+                             std::ranges::to<std::vector>();
+    uniformBufferRefs.push_back(&m_uniformBuffers);
     auto descriptorSets =
-        std::views::concat(
-            m_modelObjects | std::views::transform([](ModelObject& object) {
-              return &object.uniformBuffers;
-            }),
-            std::views::single(&m_uniformBuffers)) |
+        uniformBufferRefs |
         std::views::transform([layouts = std::vector<vk::DescriptorSetLayout>(
                                    k_maxFramesInFlight, *m_descriptorLayout),
                                this](std::vector<vk::raii::Buffer>* buffers) {
@@ -912,18 +928,17 @@ class HelloTriangleApplication {
                  std::ranges::to<std::vector<vk::raii::DescriptorSet>>();
         });
 
-    std::ranges::for_each(
-        std::views::zip(
-            std::views::concat(
-                m_modelObjects | std::views::transform([](ModelObject& obj) {
-                  return &obj.descriptorSets;
-                }),
-                std::views::single(&m_descriptorSets)),
-            descriptorSets),
-        [](auto&& pair) {
-          auto&& [dst, src] = pair;
-          *dst = std::move(src);
-        });
+    auto descriptorSetRefs = m_modelObjects |
+                             std::views::transform([](ModelObject& obj) {
+                               return &obj.descriptorSets;
+                             }) |
+                             std::ranges::to<std::vector>();
+    descriptorSetRefs.push_back(&m_descriptorSets);
+    std::ranges::for_each(std::views::zip(descriptorSetRefs, descriptorSets),
+                          [](auto&& pair) {
+                            auto&& [dst, src] = pair;
+                            *dst = std::move(src);
+                          });
   }
 
   void createCommandBuffers() {
@@ -1206,10 +1221,10 @@ class HelloTriangleApplication {
     const std::filesystem::path textureFile = m_texturesPath;
 
     uint32_t texWidth, texHeight, texChannels;
-    stbi_uc* pixels =
-        stbi_load(textureFile.c_str(), reinterpret_cast<int*>(&texWidth),
-                  reinterpret_cast<int*>(&texHeight),
-                  reinterpret_cast<int*>(&texChannels), STBI_rgb_alpha);
+    stbi_uc* pixels = stbi_load(
+        textureFile.string().c_str(), reinterpret_cast<int*>(&texWidth),
+        reinterpret_cast<int*>(&texHeight),
+        reinterpret_cast<int*>(&texChannels), STBI_rgb_alpha);
     if (!pixels) {
       throw std::runtime_error(
           std::format("Failed to open {}.", textureFile.string()));
@@ -1401,7 +1416,7 @@ class HelloTriangleApplication {
   void loadModel() {
     std::filesystem::path model = m_modelsPath;
     tinyobj::ObjReader reader;
-    if (!reader.ParseFromFile(model, tinyobj::ObjReaderConfig())) {
+    if (!reader.ParseFromFile(model.string(), tinyobj::ObjReaderConfig())) {
       if (!reader.Error().empty()) {
         throw std::runtime_error(
             std::format("Failed to load model {} with error: {}",
@@ -1441,7 +1456,7 @@ class HelloTriangleApplication {
               vertices.emplace(vertex, m_vertices.size());
               m_vertices.emplace_back(vertex);
             }
-            m_indices.emplace_back(vertices.at(vertex));
+            m_indices.emplace_back(static_cast<uint32_t>(vertices.at(vertex)));
           });
     });
 
