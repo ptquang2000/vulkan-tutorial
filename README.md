@@ -113,3 +113,25 @@ recreate graphic pipeline in advance
     - layout: reference the *immutable* data in shader
     - pool: holds descriptor set
     - set: instruct the binding for pipelines
+
+# Sample Engine
+   tweaking vulkan api 
+   preview result
+
+## application
+    input
+
+## ui
+    slate
+    layout
+        - flex: respect children slate's size
+        - grid: respect container slate's size
+
+## renderer
+    device
+    instance
+    pipeline
+    command buffer
+    vkImage
+    uniform buffer
+    mapped memory

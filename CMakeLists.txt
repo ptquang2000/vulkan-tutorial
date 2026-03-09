@@ -71,7 +71,14 @@ target_compile_definitions(Vulkan::Vulkan
 )
 
 add_executable(${PROJECT_NAME} main.cpp)
-target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan glfw glm)
+target_include_directories(${PROJECT_NAME} PUBLIC
+	glaze/include
+)
+target_link_libraries(${PROJECT_NAME} PUBLIC
+	Vulkan::Vulkan
+	glfw
+	glm
+)
 
 if (NOT DEFINED WIN32)
 	add_custom_command(
@@ -85,15 +92,25 @@ endif()
 function (add_slang_shader_target TARGET)	
 	cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
 
-	set(SHADER_DIR ${CMAKE_CURRENT_LIST_DIR}/Vulkan-Tutorial/attachments)
+	set(SHADER_DIR ${CMAKE_CURRENT_LIST_DIR}/data/shaders)
 	set(SHADER_BINARY_DIR $<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders)
   	set(ENTRY_POINTS -entry vertMain -entry fragMain)
 
 	foreach(SHADER_FILENAME ${SHADER_SOURCES})
 		set(SHADER_SOURCE "${SHADER_DIR}/${SHADER_FILENAME}")
 		set(SHADER_BINARY ${SHADER_BINARY_DIR}/${SHADER_FILENAME})
-		string(REPLACE "slang" "spv" SHADER_BINARY  ${SHADER_BINARY})
+		set(SHADER_REFLECTION ${SHADER_BINARY_DIR}/${SHADER_FILENAME})
+		string(REPLACE "slang" "spv" SHADER_BINARY  ${SHADER_FILENAME})
+		string(REPLACE "slang" "json" SHADER_REFLECTION ${SHADER_FILENAME})
 
+		set(SLANG_COMMAND 
+			${CMAKE_COMMAND} -E env LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
+			$ENV{VULKAN_SDK}/bin/slangc ${SHADER_SOURCE} 
+			-target spirv -profile spirv_1_4 -emit-spirv-directly
+			-fvk-use-entrypoint-name ${ENTRY_POINTS}
+			-o ${SHADER_BINARY}
+			-reflection-json ${SHADER_REFLECTION}
+		)
 		add_custom_command(
 			TARGET ${PROJECT_NAME} PRE_BUILD
 			COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_BINARY_DIR}
@@ -143,7 +160,7 @@ function(add_models_target TARGET)
 	endforeach()
 endfunction()
 
-add_slang_shader_target(${PROJECT_NAME}Shaders SOURCES 22_shader_ubo.slang 27_shader_depth.slang)
+add_slang_shader_target(${PROJECT_NAME}Shaders SOURCES vertex_buffer.slang shader_depth.slang test.slang)
 add_texture_target(${PROJECT_NAME}Textures SOURCES texture.jpg triangle.png)
 add_models_target(${PROJECT_NAME}Models SOURCES viking_room.obj viking_room.png)
 
